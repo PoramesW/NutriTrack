@@ -1,5 +1,5 @@
 
-import { Link, NavLink } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 
 const navigationItems = [
   { to: "/dashboard", label: "Dashboard" },
@@ -29,9 +29,6 @@ export default function Navbar() {
           </NavLink>
         ))}
       </nav>
-
-      <Link to="/login">เข้าสู่ระบบ</Link>
-      <Link to="/register">สมัครสมาชิก</Link>
 
       <div className="sidebar-footer">
         Nutrition & Fitness Tracker
