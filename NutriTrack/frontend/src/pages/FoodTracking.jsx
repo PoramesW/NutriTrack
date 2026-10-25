@@ -1,35 +1,6 @@
 
-import { useMemo, useState } from "react";
-
-const initialFoods = [
-  {
-    id: 1,
-    name: "ข้าวกะเพราไก่",
-    meal: "Lunch",
-    calories: 550,
-    protein: 30,
-    carbs: 65,
-    fat: 16,
-  },
-  {
-    id: 2,
-    name: "ไข่ต้ม 2 ฟอง",
-    meal: "Breakfast",
-    calories: 156,
-    protein: 13,
-    carbs: 1,
-    fat: 11,
-  },
-  {
-    id: 3,
-    name: "อกไก่ต้ม",
-    meal: "Dinner",
-    calories: 220,
-    protein: 42,
-    carbs: 0,
-    fat: 5,
-  },
-];
+import { useEffect, useMemo, useState } from "react";
+import { foodApi } from "../services/api";
 
 const emptyForm = {
   name: "",
@@ -47,18 +18,94 @@ const mealOptions = [
   { value: "Snack", label: "Snack" },
 ];
 
+const numericFields = ["calories", "protein", "carbs", "fat"];
+
 function formatNumber(value) {
-  return Number(value).toLocaleString("en-US", {
-    maximumFractionDigits: 1,
-  });
+  const number = Number(value);
+  return (Number.isFinite(number) ? number : 0).toLocaleString(
+    "en-US",
+    { maximumFractionDigits: 1 }
+  );
+}
+
+// รองรับทั้ง API ที่ส่ง Array โดยตรง
+// และ API ที่ส่ง { foods: [...] } หรือ { data: [...] }
+function normalizeFoods(response) {
+  let items = response;
+
+  if (!Array.isArray(items)) {
+    items = response?.foods ?? response?.data ?? response?.items;
+  }
+
+  if (!Array.isArray(items)) {
+    throw new Error("The API returned an invalid food list.");
+  }
+
+  return items.map((food) => ({
+    ...food,
+    id: food.id ?? food._id,
+    name: String(food.name ?? ""),
+    meal: food.meal ?? "Snack",
+    calories: Number(food.calories ?? 0),
+    protein: Number(food.protein ?? 0),
+    carbs: Number(food.carbs ?? 0),
+    fat: Number(food.fat ?? 0),
+  }));
+}
+
+function getErrorMessage(error, fallback) {
+  return error instanceof Error && error.message
+    ? error.message
+    : fallback;
 }
 
 export default function FoodTracking() {
-  const [foods, setFoods] = useState(initialFoods);
+  const [foods, setFoods] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [selectedMeal, setSelectedMeal] = useState("All");
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+
+  // โหลดข้อมูลจาก Backend ตอนเปิดหน้า
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFoods() {
+      setLoading(true);
+      setError("");
+
+      try {
+        const response = await foodApi.getAll();
+        const loadedFoods = normalizeFoods(response);
+
+        if (!cancelled) {
+          setFoods(loadedFoods);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            getErrorMessage(
+              err,
+              "Unable to load food entries. Please try again."
+            )
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadFoods();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const totals = useMemo(
     () =>
@@ -81,43 +128,47 @@ export default function FoodTracking() {
 
   function handleChange(event) {
     const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
+
+    setForm((current) => ({
+      ...current,
+      [name]: value,
+    }));
   }
 
-  function handleAddFood(event) {
+  function resetForm() {
+    setForm(emptyForm);
+    setShowForm(false);
+  }
+
+  async function handleAddFood(event) {
     event.preventDefault();
     setError("");
 
-    const numericFields = [
-      "calories",
-      "protein",
-      "carbs",
-      "fat",
-    ];
+    const name = form.name.trim();
 
-    const invalidNumber = numericFields.some((field) => {
-      const value = Number(form[field]);
-      return (
-        form[field] === "" ||
-        !Number.isFinite(value) ||
-        value < 0 ||
-        value > 100000
-      );
-    });
-
-    if (!form.name.trim()) {
+    if (!name) {
       setError("Please enter a food name.");
       return;
     }
+
+    const invalidNumber = numericFields.some((field) => {
+      const value = form[field];
+
+      return (
+        value === "" ||
+        !Number.isFinite(Number(value)) ||
+        Number(value) < 0 ||
+        Number(value) > 100000
+      );
+    });
 
     if (invalidNumber) {
       setError("Enter valid non-negative nutrient values.");
       return;
     }
 
-    const newFood = {
-      id: `${Date.now()}-${Math.random()}`,
-      name: form.name.trim(),
+    const payload = {
+      name,
       meal: form.meal,
       calories: Number(form.calories),
       protein: Number(form.protein),
@@ -125,13 +176,74 @@ export default function FoodTracking() {
       fat: Number(form.fat),
     };
 
-    setFoods((current) => [...current, newFood]);
-    setForm(emptyForm);
-    setShowForm(false);
+    setSaving(true);
+
+    try {
+      const response = await foodApi.add(payload);
+
+      // รองรับ API ที่ส่งรายการที่สร้างแล้วกลับมา
+      const returnedFood =
+        response?.food ??
+        response?.data?.food ??
+        response?.data ??
+        response;
+
+      let savedFood;
+
+      if (
+        returnedFood &&
+        typeof returnedFood === "object" &&
+        (returnedFood.id != null || returnedFood._id != null)
+      ) {
+        savedFood = normalizeFoods([returnedFood])[0];
+      } else {
+        // ถ้า API ไม่ส่ง ID กลับมา ให้โหลดรายการใหม่
+        const refreshedResponse = await foodApi.getAll();
+        const refreshedFoods = normalizeFoods(refreshedResponse);
+
+        setFoods(refreshedFoods);
+        resetForm();
+        return;
+      }
+
+      setFoods((current) => [...current, savedFood]);
+      resetForm();
+    } catch (err) {
+      setError(
+        getErrorMessage(
+          err,
+          "Unable to save food. Please try again."
+        )
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function handleRemoveFood(id) {
-    setFoods((current) => current.filter((food) => food.id !== id));
+  async function handleRemoveFood(id) {
+    if (id == null || deletingId != null) {
+      return;
+    }
+
+    setError("");
+    setDeletingId(id);
+
+    try {
+      await foodApi.delete(id);
+
+      setFoods((current) =>
+        current.filter((food) => String(food.id) !== String(id))
+      );
+    } catch (err) {
+      setError(
+        getErrorMessage(
+          err,
+          "Unable to remove food. Please try again."
+        )
+      );
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -146,19 +258,32 @@ export default function FoodTracking() {
         </div>
 
         <button
+          type="button"
           className="food-primary-button"
           onClick={() => {
             setError("");
-            setShowForm((current) => !current);
+
+            if (showForm) {
+              resetForm();
+            } else {
+              setShowForm(true);
+            }
           }}
+          disabled={saving}
         >
           {showForm ? "Cancel" : "+ Add food"}
         </button>
       </header>
 
-      <div className="food-demo-notice">
-        Demo mode — entries reset when you refresh this page.
-      </div>
+      {loading && (
+        <p role="status">Loading food entries...</p>
+      )}
+
+      {error && (
+        <p className="food-error" role="alert">
+          {error}
+        </p>
+      )}
 
       {showForm && (
         <section className="food-panel food-form-panel">
@@ -257,26 +382,25 @@ export default function FoodTracking() {
               />
             </div>
 
-            {error && (
-              <p className="food-error" role="alert">
-                {error}
-              </p>
-            )}
-
             <div className="food-form-actions">
               <button
                 type="button"
                 className="food-secondary-button"
                 onClick={() => {
-                  setShowForm(false);
-                  setForm(emptyForm);
+                  resetForm();
                   setError("");
                 }}
+                disabled={saving}
               >
                 Cancel
               </button>
-              <button type="submit" className="food-primary-button">
-                Save food
+
+              <button
+                type="submit"
+                className="food-primary-button"
+                disabled={saving}
+              >
+                {saving ? "Saving..." : "Save food"}
               </button>
             </div>
           </form>
@@ -314,7 +438,8 @@ export default function FoodTracking() {
           <div>
             <h2>Food diary</h2>
             <p className="food-muted">
-              {foods.length} {foods.length === 1 ? "entry" : "entries"} recorded
+              {foods.length}{" "}
+              {foods.length === 1 ? "entry" : "entries"} recorded
             </p>
           </div>
 
@@ -335,7 +460,11 @@ export default function FoodTracking() {
           </label>
         </div>
 
-        {filteredFoods.length === 0 ? (
+        {loading ? (
+          <div className="food-empty-state">
+            <p>Loading your food diary...</p>
+          </div>
+        ) : filteredFoods.length === 0 ? (
           <div className="food-empty-state">
             <span>🍽️</span>
             <h3>No food entries</h3>
@@ -355,12 +484,15 @@ export default function FoodTracking() {
                   <th>Action</th>
                 </tr>
               </thead>
+
               <tbody>
                 {filteredFoods.map((food) => (
                   <tr key={food.id}>
                     <td className="food-name-cell">{food.name}</td>
                     <td>
-                      <span className="food-meal-tag">{food.meal}</span>
+                      <span className="food-meal-tag">
+                        {food.meal}
+                      </span>
                     </td>
                     <td>{formatNumber(food.calories)}</td>
                     <td>{formatNumber(food.protein)} g</td>
@@ -368,16 +500,21 @@ export default function FoodTracking() {
                     <td>{formatNumber(food.fat)} g</td>
                     <td>
                       <button
+                        type="button"
                         className="food-remove-button"
                         onClick={() => handleRemoveFood(food.id)}
+                        disabled={deletingId != null}
                         aria-label={`Remove ${food.name}`}
                       >
-                        Remove
+                        {String(deletingId) === String(food.id)
+                          ? "Removing..."
+                          : "Remove"}
                       </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
+
               <tfoot>
                 <tr>
                   <td colSpan="2">Total · all logged foods</td>
