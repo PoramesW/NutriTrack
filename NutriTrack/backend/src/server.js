@@ -1,11 +1,11 @@
-
+﻿
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
-
+const catalogRoutes = require("./routes/catalog.route");
 const nutritionRoutes = require("./routes/nutrition.route");
 const authRoutes = require("./routes/auth.routes");
-const foodRoutes = require("./routes/food.route");const foodRoutes = require("./routes/food.route");
+const foodRoutes = require("./routes/food.route");
 const app = express();
 const analyticsRoutes = require("./routes/analytics.route");
 const analyzationRoutes = require("./routes/analyzation.route");
@@ -19,7 +19,7 @@ app.use("/api/nutrition", nutritionRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/workouts", workoutRoutes);
 app.use("/api/analyzation", analyzationRoutes);
-
+app.use("/api/catalog", catalogRoutes);
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     success: true,
@@ -32,3 +32,4 @@ app.use("/api/auth", authRoutes);
 app.listen(PORT, () => {
   console.log(`NutriTrack API running at http://localhost:${PORT}`);
 });
+
