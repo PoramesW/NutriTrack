@@ -1,6 +1,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { foodApi } from "../services/api";
+import FoodCatalogPicker from "../components/food-catalog/FoodCatalogPicker";
 
 const emptyForm = {
   name: "",
