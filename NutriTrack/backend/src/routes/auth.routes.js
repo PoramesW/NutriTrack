@@ -5,12 +5,16 @@ const router = express.Router();
 const {
   register,
   login,
+  getMe,
 } = require("../controllers/auth.controller");
 
-// POST /api/auth/register
-router.post("/register", register);
+const authenticateToken = require("../middleware/auth");
 
-// POST /api/auth/login
+// Public routes
+router.post("/register", register);
 router.post("/login", login);
+
+// Protected routes
+router.get("/me", authenticateToken, getMe);
 
 module.exports = router;
