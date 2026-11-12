@@ -1,26 +1,20 @@
-﻿
-const express = require("express");
+﻿const express = require("express");
 const cors = require("cors");
-require("dotenv").config();
-<<<<<<< HEAD
+const fs = require("fs");
+const path = require("path");
 
-// Routes
-const nutritionRoutes = require("./routes/nutrition.route");
-const authRoutes = require("./routes/auth.routes");
-const foodRoutes = require("./routes/food.route");
-=======
-const catalogRoutes = require("./routes/catalog.route");
-const nutritionRoutes = require("./routes/nutrition.route");
-const authRoutes = require("./routes/auth.routes");
-const foodRoutes = require("./routes/food.route");
-const app = express();
->>>>>>> c9cb06cc8a727aea2f3e7f6d5eaef888eae9ea74
-const analyticsRoutes = require("./routes/analytics.route");
-const analyzationRoutes = require("./routes/analyzation.route");
-const workoutRoutes = require("./routes/workout.route");
+require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Routes
+const authRoutes = require("./routes/auth.routes");
+const foodRoutes = require("./routes/food.route");
+const nutritionRoutes = require("./routes/nutrition.route");
+const analyticsRoutes = require("./routes/analytics.route");
+const analyzationRoutes = require("./routes/analyzation.route");
+const workoutRoutes = require("./routes/workout.route");
 
 // Middleware
 app.use(cors());
@@ -31,18 +25,22 @@ app.use("/api/auth", authRoutes);
 app.use("/api/food", foodRoutes);
 app.use("/api/nutrition", nutritionRoutes);
 app.use("/api/analytics", analyticsRoutes);
-app.use("/api/workouts", workoutRoutes);
 app.use("/api/analyzation", analyzationRoutes);
-<<<<<<< HEAD
+app.use("/api/workouts", workoutRoutes);
+
+// Catalog route (if available)
+const catalogRoutePath = path.join(__dirname, "routes", "catalog.route.js");
+
+if (fs.existsSync(catalogRoutePath)) {
+  const catalogRoutes = require("./routes/catalog.route");
+  app.use("/api/catalog", catalogRoutes);
+}
 
 // Health Check
-=======
-app.use("/api/catalog", catalogRoutes);
->>>>>>> c9cb06cc8a727aea2f3e7f6d5eaef888eae9ea74
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     success: true,
-    message: "NutriTrack API is running",
+    message: "NutriTrack API is running"
   });
 });
 
@@ -50,4 +48,3 @@ app.get("/api/health", (req, res) => {
 app.listen(PORT, () => {
   console.log(`NutriTrack API running at http://localhost:${PORT}`);
 });
-
