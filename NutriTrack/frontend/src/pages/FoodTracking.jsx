@@ -247,6 +247,66 @@ export default function FoodTracking() {
     }
   }
 
+async function handleAddCatalogFood(food) {
+  setError("");
+  setSaving(true);
+
+  try {
+    const payload = {
+      food_id: food.food_id || food.id,
+      name: food.name,
+      meal: food.meal || form.meal,
+      quantity: Number(food.quantity),
+      calories: Number(food.calories),
+      protein: Number(food.protein),
+      carbs: Number(food.carbs),
+      fat: Number(food.fat),
+    };
+
+    const response = await foodApi.add(payload);
+    const savedFood = normalizeFoods([response.data])[0];
+
+    setFoods((current) => [...current, savedFood]);
+  } catch (err) {
+    setError(
+      getErrorMessage(err, "Unable to save catalog food.")
+    );
+    throw err;
+  } finally {
+    setSaving(false);
+  }
+}
+
+async function handleAddCatalogFood(food) {
+  setError("");
+  setSaving(true);
+
+  try {
+    const payload = {
+      food_id: food.food_id || food.id,
+      name: food.name,
+      meal: food.meal || form.meal,
+      quantity: Number(food.quantity),
+      calories: Number(food.calories),
+      protein: Number(food.protein),
+      carbs: Number(food.carbs),
+      fat: Number(food.fat),
+    };
+
+    const response = await foodApi.add(payload);
+    const savedFood = normalizeFoods([response.data])[0];
+
+    setFoods((current) => [...current, savedFood]);
+  } catch (err) {
+    setError(
+      getErrorMessage(err, "Unable to save catalog food.")
+    );
+    throw err;
+  } finally {
+    setSaving(false);
+  }
+}
+
   return (
     <div className="food-page">
       <header className="food-page-header">
@@ -292,6 +352,11 @@ export default function FoodTracking() {
           <p className="food-muted">
             Enter the nutrient values for the portion you ate.
           </p>
+
+          <FoodCatalogPicker
+            onAdd={handleAddCatalogFood}
+            meal={form.meal}
+          />
 
           <form className="food-entry-form" onSubmit={handleAddFood}>
             <div className="food-field food-field-wide">

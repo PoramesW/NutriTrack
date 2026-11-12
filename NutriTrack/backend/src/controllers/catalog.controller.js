@@ -10,11 +10,9 @@ async function searchIngredients(req, res) {
       `SELECT
          id,
          name,
-         serving_unit AS unit
+         unit
        FROM foods
-       WHERE is_active = TRUE
-         AND owner_user_id IS NULL
-         AND ($1 = '' OR name ILIKE $2)
+       WHERE ($1 = '' OR name ILIKE $2)
        ORDER BY name ASC
        LIMIT 50`,
       [query, `%${query}%`]
@@ -40,16 +38,13 @@ async function getIngredientById(req, res) {
       `SELECT
          id,
          name,
-         serving_size,
-         serving_unit AS unit,
-         calories,
+         unit,
+         cal,
          protein,
          carbs,
          fat
        FROM foods
-       WHERE id = $1
-         AND is_active = TRUE
-         AND owner_user_id IS NULL`,
+       WHERE id = $1`,
       [id]
     );
 
@@ -95,16 +90,13 @@ async function calculateNutrition(req, res) {
       `SELECT
          id,
          name,
-         serving_size,
-         serving_unit,
-         calories,
+         unit,
+         cal,
          protein,
          carbs,
          fat
        FROM foods
-       WHERE id = $1
-         AND is_active = TRUE
-         AND owner_user_id IS NULL`,
+       WHERE id = $1`,
       [id]
     );
 
@@ -116,26 +108,16 @@ async function calculateNutrition(req, res) {
     }
 
     const food = result.rows[0];
-    const servingSize = Number(food.serving_size);
-
-    if (!Number.isFinite(servingSize) || servingSize <= 0) {
-      return res.status(500).json({
-        success: false,
-        message: "Invalid food serving size",
-      });
-    }
-
-    const multiplier = amount / servingSize;
 
     return res.json({
       id: food.id,
       name: food.name,
       quantity: amount,
-      unit: food.serving_unit,
-      calories: Number(food.calories) * multiplier,
-      protein: Number(food.protein) * multiplier,
-      carbs: Number(food.carbs) * multiplier,
-      fat: Number(food.fat) * multiplier,
+      unit: food.unit,
+      calories: Number(food.cal) * amount,
+      protein: Number(food.protein) * amount,
+      carbs: Number(food.carbs) * amount,
+      fat: Number(food.fat) * amount,
     });
   } catch (error) {
     console.error("Calculate nutrition error:", error.message);

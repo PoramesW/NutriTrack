@@ -1,43 +1,26 @@
 
-const crypto = require("crypto");
-
-// เก็บข้อมูลในหน่วยความจำชั่วคราว ไม่ใช้ฐานข้อมูล
-const foodLogs = new Map();
-
-function getUserId(req) {
-  // รองรับ userId ที่ส่งมาจาก Frontend สำหรับโปรเจกต์สาธิต
-  // ไม่ใช่การยืนยันตัวตนที่ปลอดภัยสำหรับ Production
-  return String(req.header("x-demo-user-id") || "demo-user");
-}
-
-function getLogs(userId) {
-  if (!foodLogs.has(userId)) {
-    foodLogs.set(userId, []);
-  }
-
-  return foodLogs.get(userId);
-}
+const pool = require("../config/db");
 
 function validateFood(body) {
-  const { name, calories, protein, carbs, fat, date } = body;
+  const name = body.name ?? body.food_name;
 
   if (typeof name !== "string" || !name.trim()) {
     return "Food name is required";
   }
 
-  for (const [key, value] of Object.entries({
-    calories,
-    protein,
-    carbs,
-    fat,
-  })) {
+  for (const key of ["calories", "protein", "carbs", "fat", "quantity"]) {
+    const value = body[key];
+
     if (
       value !== undefined &&
-      (!Number.isFinite(Number(value)) || Number(value) < 0)
+      (!Number.isFinite(Number(value)) ||
+        Number(value) < (key === "quantity" ? 0.1 : 0))
     ) {
-      return `${key} must be a non-negative number`;
+      return `${key} must be a valid non-negative number`;
     }
   }
+
+  const date = body.date ?? body.logged_at;
 
   if (date !== undefined && Number.isNaN(Date.parse(date))) {
     return "Invalid date";
@@ -47,101 +30,187 @@ function validateFood(body) {
 }
 
 // GET /api/food
-function getFoods(req, res) {
-  const logs = getLogs(getUserId(req));
+async function getFoods(req, res) {
+  try {
+    const result = await pool.query(
+      `SELECT
+         id,
+         food_id,
+         food_name AS name,
+         meal,
+         quantity,
+         calories,
+         protein,
+         carbs,
+         fat,
+         logged_at AS date,
+         created_at AS "createdAt"
+       FROM food_logs
+       WHERE user_id = $1
+       ORDER BY logged_at DESC`,
+      [req.user.id]
+    );
 
-  res.json({
-    success: true,
-    count: logs.length,
-    data: logs,
-  });
+    return res.json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows,
+    });
+  } catch (error) {
+    console.error("Get foods error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to retrieve food records",
+    });
+  }
 }
 
 // POST /api/food
-function addFood(req, res) {
-  const error = validateFood(req.body);
+async function addFood(req, res) {
+  try {
+    const error = validateFood(req.body);
 
-  if (error) {
-    return res.status(400).json({
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error,
+      });
+    }
+
+    const {
+      name,
+      food_name,
+      id,
+      food_id,
+      meal = "Breakfast",
+      quantity = 1,
+      calories = 0,
+      protein = 0,
+      carbs = 0,
+      fat = 0,
+      date,
+      logged_at,
+    } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO food_logs (
+         user_id,
+         food_id,
+         food_name,
+         meal,
+         quantity,
+         calories,
+         protein,
+         carbs,
+         fat,
+         logged_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::timestamptz, NOW()))
+       RETURNING
+         id,
+         food_id,
+         food_name AS name,
+         meal,
+         quantity,
+         calories,
+         protein,
+         carbs,
+         fat,
+         logged_at AS date,
+         created_at AS "createdAt"`,
+      [
+        req.user.id,
+        food_id || id || null,
+        (name || food_name).trim(),
+        meal,
+        Number(quantity),
+        Number(calories),
+        Number(protein),
+        Number(carbs),
+        Number(fat),
+        date || logged_at || null,
+      ]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Food added successfully",
+      data: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Add food error:", error.message);
+    return res.status(500).json({
       success: false,
-      message: error,
+      message: "Failed to add food record",
     });
   }
-
-  const {
-    name,
-    meal = "Breakfast",
-    calories = 0,
-    protein = 0,
-    carbs = 0,
-    fat = 0,
-    date,
-  } = req.body;
-
-
-  
-const food = {
-  id: crypto.randomUUID(),
-  name: name.trim(),
-  meal,
-  calories: Number(calories),
-  protein: Number(protein),
-  carbs: Number(carbs),
-  fat: Number(fat),
-  date: date || new Date().toISOString(),
-  createdAt: new Date().toISOString(),
-};
-
-  const logs = getLogs(getUserId(req));
-  logs.unshift(food);
-
-  return res.status(201).json({
-    success: true,
-    message: "Food added successfully",
-    data: food,
-  });
 }
 
 // DELETE /api/food/:id
-function deleteFood(req, res) {
-  const logs = getLogs(getUserId(req));
-  const index = logs.findIndex((food) => food.id === req.params.id);
+async function deleteFood(req, res) {
+  try {
+    const result = await pool.query(
+      `DELETE FROM food_logs
+       WHERE id = $1 AND user_id = $2
+       RETURNING id, food_name AS name`,
+      [req.params.id, req.user.id]
+    );
 
-  if (index === -1) {
-    return res.status(404).json({
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Food record not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Food deleted successfully",
+      data: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Delete food error:", error.message);
+    return res.status(500).json({
       success: false,
-      message: "Food record not found",
+      message: "Failed to delete food record",
     });
   }
-
-  const [deleted] = logs.splice(index, 1);
-
-  return res.json({
-    success: true,
-    message: "Food deleted successfully",
-    data: deleted,
-  });
 }
 
 // GET /api/food/summary
-function getFoodSummary(req, res) {
-  const logs = getLogs(getUserId(req));
+async function getFoodSummary(req, res) {
+  try {
+    const result = await pool.query(
+      `SELECT
+         COUNT(*) AS count,
+         COALESCE(SUM(calories), 0) AS calories,
+         COALESCE(SUM(protein), 0) AS protein,
+         COALESCE(SUM(carbs), 0) AS carbs,
+         COALESCE(SUM(fat), 0) AS fat
+       FROM food_logs
+       WHERE user_id = $1`,
+      [req.user.id]
+    );
 
-  const summary = logs.reduce(
-    (total, food) => ({
-      calories: total.calories + food.calories,
-      protein: total.protein + food.protein,
-      carbs: total.carbs + food.carbs,
-      fat: total.fat + food.fat,
-    }),
-    { calories: 0, protein: 0, carbs: 0, fat: 0 }
-  );
+    const summary = result.rows[0];
 
-  return res.json({
-    success: true,
-    count: logs.length,
-    data: summary,
-  });
+    return res.json({
+      success: true,
+      count: Number(summary.count),
+      data: {
+        calories: Number(summary.calories),
+        protein: Number(summary.protein),
+        carbs: Number(summary.carbs),
+        fat: Number(summary.fat),
+      },
+    });
+  } catch (error) {
+    console.error("Get food summary error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to retrieve food summary",
+    });
+  }
 }
 
 module.exports = {

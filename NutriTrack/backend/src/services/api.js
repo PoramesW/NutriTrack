@@ -1,74 +1,103 @@
 
-const API_BASE_URL =
+const API_URL =
   import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-async function apiRequest(endpoint, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+const TOKEN_KEY = "nutritrack_token";
+
+async function apiRequest(path, options = {}) {
+  const token = localStorage.getItem(TOKEN_KEY);
+
+  const headers = {
+    ...(options.body ? { "Content-Type": "application/json" } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...options.headers,
+  };
+
+  const response = await fetch(`${API_URL}${path}`, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
+    headers,
   });
 
-  const result = await response.json().catch(() => ({}));
+  const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(
-      result.message || `Request failed: ${response.status}`
-    );
+    throw new Error(data.message || "Request failed");
   }
 
-  return result;
-}
-
-function get(endpoint) {
-  return apiRequest(endpoint);
-}
-
-function post(endpoint, data) {
-  return apiRequest(endpoint, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-}
-
-function remove(endpoint) {
-  return apiRequest(endpoint, {
-    method: "DELETE",
-  });
+  return data;
 }
 
 export const authApi = {
-  register: (data) => post("/auth/register", data),
-  login: (data) => post("/auth/login", data),
+  login: (email, password) =>
+    apiRequest("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+
+  register: (name, email, password) =>
+    apiRequest("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password }),
+    }),
+
+  me: () => apiRequest("/auth/me"),
 };
 
 export const foodApi = {
-  getAll: () => get("/food"),
-  getSummary: () => get("/food/summary"),
-  add: (data) => post("/food", data),
-  delete: (id) => remove(`/food/${encodeURIComponent(id)}`),
+  getAll: () => apiRequest("/food"),
+
+  getSummary: () => apiRequest("/food/summary"),
+
+  add: (data) =>
+    apiRequest("/food", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id) =>
+    apiRequest(`/food/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
 };
 
-export const nutritionApi = {
-  calculate: (foods, goals) =>
-    post("/nutrition/calculate", { foods, goals }),
+export const catalogApi = {
+  async searchIngredients(query = "") {
+    const params = new URLSearchParams();
+
+    if (query.trim()) {
+      params.set("q", query.trim());
+    }
+
+    const response = await fetch(
+      `${API_URL}/catalog/ingredients?${params.toString()}`
+    );
+
+    const data = await response.json().catch(() => []);
+
+    if (!response.ok) {
+      throw new Error(data.message || "Unable to search food catalog");
+    }
+
+    return data;
+  },
+
+  async calculate(id, quantity) {
+    const response = await fetch(`${API_URL}/catalog/calculate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ id, quantity }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.message || "Unable to calculate nutrition");
+    }
+
+    return data;
+  },
 };
 
-export const analyticsApi = {
-  getDashboard: (foods, exercises = [], goals) =>
-    post("/analytics/dashboard", { foods, exercises, goals }),
-};
-
-export const analyzationApi = {
-  analyze: (history, goals) =>
-    post("/analyzation", { history, goals }),
-};
-
-export const workoutApi = {
-  getAll: () => get("/workouts"),
-  getSummary: () => get("/workouts/summary"),
-  add: (data) => post("/workouts", data),
-  delete: (id) => remove(`/workouts/${encodeURIComponent(id)}`),
-};
+export { TOKEN_KEY };

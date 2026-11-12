@@ -1,10 +1,22 @@
 
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const pool = require("../config/db");
 
-// เก็บบัญชีไว้ในหน่วยความจำชั่วคราว
-// ข้อมูลจะหายเมื่อ Backend รีสตาร์ต
-const users = new Map();
+function createToken(user) {
+  if (!process.env.JWT_SECRET) {
+    throw new Error("JWT_SECRET is not configured");
+  }
+
+  return jwt.sign(
+    {
+      sub: user.id,
+      email: user.email,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "2h" }
+  );
+}
 
 async function register(req, res) {
   try {
@@ -40,7 +52,19 @@ async function register(req, res) {
       });
     }
 
-    if (users.has(normalizedEmail)) {
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({
+        success: false,
+        message: "Authentication is not configured",
+      });
+    }
+
+    const existingUser = await pool.query(
+      "SELECT id FROM users WHERE LOWER(email) = $1 LIMIT 1",
+      [normalizedEmail]
+    );
+
+    if (existingUser.rows.length > 0) {
       return res.status(409).json({
         success: false,
         message: "Email is already registered",
@@ -49,25 +73,30 @@ async function register(req, res) {
 
     const passwordHash = await bcrypt.hash(password, 10);
 
-    const user = {
-      id: Date.now().toString(),
-      name: name.trim(),
-      email: normalizedEmail,
-      passwordHash,
-    };
+    const result = await pool.query(
+      `INSERT INTO users (name, email, password_hash)
+       VALUES ($1, $2, $3)
+       RETURNING id, name, email`,
+      [name.trim(), normalizedEmail, passwordHash]
+    );
 
-    users.set(normalizedEmail, user);
+    const user = result.rows[0];
+    const token = createToken(user);
 
     return res.status(201).json({
       success: true,
       message: "Registration successful",
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-      },
+      token,
+      user,
     });
   } catch (error) {
+    if (error.code === "23505") {
+      return res.status(409).json({
+        success: false,
+        message: "Email is already registered",
+      });
+    }
+
     console.error("Register error:", error.message);
 
     return res.status(500).json({
@@ -93,16 +122,6 @@ async function login(req, res) {
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
-    const user = users.get(normalizedEmail);
-
-    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password",
-      });
-    }
-
     if (!process.env.JWT_SECRET) {
       return res.status(500).json({
         success: false,
@@ -110,14 +129,26 @@ async function login(req, res) {
       });
     }
 
-    const token = jwt.sign(
-      {
-        sub: user.id,
-        email: user.email,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "2h" }
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const result = await pool.query(
+      `SELECT id, name, email, password_hash
+       FROM users
+       WHERE LOWER(email) = $1
+       LIMIT 1`,
+      [normalizedEmail]
     );
+
+    const user = result.rows[0];
+
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+    const token = createToken(user);
 
     return res.status(200).json({
       success: true,
@@ -139,4 +170,39 @@ async function login(req, res) {
   }
 }
 
-module.exports = { register, login };
+async function getMe(req, res) {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, email
+       FROM users
+       WHERE id = $1
+       LIMIT 1`,
+      [req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      user: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Get current user error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+}
+
+module.exports = {
+  register,
+  login,
+  getMe,
+};

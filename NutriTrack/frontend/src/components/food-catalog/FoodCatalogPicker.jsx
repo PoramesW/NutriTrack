@@ -1,7 +1,8 @@
+
 import { useEffect, useState } from "react";
 import { catalogApi } from "../../services/api";
 
-export default function FoodCatalogPicker({ onAdd }) {
+export default function FoodCatalogPicker({ onAdd, meal = "Snack" }) {
   const [query, setQuery] = useState("");
   const [foods, setFoods] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -16,7 +17,9 @@ export default function FoodCatalogPicker({ onAdd }) {
     catalogApi
       .searchIngredients(query)
       .then((data) => {
-        if (active) setFoods(data);
+        if (active) {
+          setFoods(Array.isArray(data) ? data : []);
+        }
       })
       .catch((err) => {
         if (active) setError(err.message);
@@ -29,7 +32,14 @@ export default function FoodCatalogPicker({ onAdd }) {
 
   async function handleCalculate() {
     if (!selected) {
-      setError("กรุณาเลือกอาหารก่อน");
+      setError("Please select a food first.");
+      return;
+    }
+
+    const amount = Number(quantity);
+
+    if (!Number.isFinite(amount) || amount < 0.1 || amount > 10000) {
+      setError("Quantity must be between 0.1 and 10000.");
       return;
     }
 
@@ -37,11 +47,7 @@ export default function FoodCatalogPicker({ onAdd }) {
       setLoading(true);
       setError("");
 
-      const result = await catalogApi.calculate(
-        selected.id,
-        quantity
-      );
-
+      const result = await catalogApi.calculate(selected.id, amount);
       setNutrition(result);
     } catch (err) {
       setError(err.message);
@@ -50,38 +56,47 @@ export default function FoodCatalogPicker({ onAdd }) {
     }
   }
 
-  function handleAdd() {
+  async function handleAdd() {
     if (!nutrition) return;
 
     if (typeof onAdd !== "function") {
-      setError("ยังไม่ได้เชื่อมฟังก์ชันบันทึกอาหาร");
+      setError("Food saving is not configured.");
       return;
     }
 
-    onAdd({
-      ...nutrition,
-      meal: "Snack"
-    });
+    try {
+      setLoading(true);
+      setError("");
 
-    setSelected(null);
-    setQuantity(1);
-    setNutrition(null);
-    setQuery("");
-    setError("");
+      await onAdd({
+        ...nutrition,
+        food_id: nutrition.id,
+        meal,
+      });
+
+      setSelected(null);
+      setQuantity(1);
+      setNutrition(null);
+      setQuery("");
+    } catch (err) {
+      setError(err.message || "Unable to save food.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <section className="food-catalog-picker">
-      <h2>เพิ่มอาหารจากฐานข้อมูล</h2>
+      <h2>Add food from catalog</h2>
 
-      <label htmlFor="food-search">ค้นหาอาหาร</label>
+      <label htmlFor="food-search">Search food</label>
       <input
         id="food-search"
         type="text"
-        placeholder="เช่น อกไก่ ข้าวสวย ไข่ไก่"
+        placeholder="e.g. chicken, rice, egg"
         value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
+        onChange={(event) => {
+          setQuery(event.target.value);
           setSelected(null);
           setNutrition(null);
           setError("");
@@ -108,11 +123,11 @@ export default function FoodCatalogPicker({ onAdd }) {
       {selected && (
         <div>
           <p>
-            เลือกแล้ว: <strong>{selected.name}</strong>
+            Selected: <strong>{selected.name}</strong>
           </p>
 
           <label htmlFor="food-quantity">
-            จำนวนหน่วย ({selected.unit})
+            Quantity ({selected.unit})
           </label>
 
           <input
@@ -122,8 +137,8 @@ export default function FoodCatalogPicker({ onAdd }) {
             max="10000"
             step="0.1"
             value={quantity}
-            onChange={(e) => {
-              setQuantity(e.target.value);
+            onChange={(event) => {
+              setQuantity(event.target.value);
               setNutrition(null);
             }}
           />
@@ -133,7 +148,7 @@ export default function FoodCatalogPicker({ onAdd }) {
             onClick={handleCalculate}
             disabled={loading}
           >
-            {loading ? "กำลังคำนวณ..." : "คำนวณสารอาหาร"}
+            {loading ? "Calculating..." : "Calculate nutrition"}
           </button>
         </div>
       )}
@@ -141,13 +156,17 @@ export default function FoodCatalogPicker({ onAdd }) {
       {nutrition && (
         <div className="food-nutrition-preview">
           <h3>{nutrition.name}</h3>
-          <p>พลังงาน: {nutrition.calories.toFixed(1)} kcal</p>
-          <p>โปรตีน: {nutrition.protein.toFixed(1)} g</p>
-          <p>คาร์โบไฮเดรต: {nutrition.carbs.toFixed(1)} g</p>
-          <p>ไขมัน: {nutrition.fat.toFixed(1)} g</p>
+          <p>Calories: {Number(nutrition.calories).toFixed(1)} kcal</p>
+          <p>Protein: {Number(nutrition.protein).toFixed(1)} g</p>
+          <p>Carbs: {Number(nutrition.carbs).toFixed(1)} g</p>
+          <p>Fat: {Number(nutrition.fat).toFixed(1)} g</p>
 
-          <button type="button" onClick={handleAdd}>
-            เพิ่มลงรายการอาหาร
+          <button
+            type="button"
+            onClick={handleAdd}
+            disabled={loading}
+          >
+            {loading ? "Saving..." : "Add to food log"}
           </button>
         </div>
       )}
