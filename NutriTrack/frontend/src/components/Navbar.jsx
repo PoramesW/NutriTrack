@@ -1,5 +1,6 @@
 
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
+import { TOKEN_KEY } from "../services/api";
 
 const navigationItems = [
   { to: "/dashboard", label: "Dashboard" },
@@ -9,6 +10,13 @@ const navigationItems = [
 ];
 
 export default function Navbar() {
+  const navigate = useNavigate();
+
+  function handleLogout() {
+    localStorage.removeItem(TOKEN_KEY);
+    navigate("/welcome", { replace: true });
+  }
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -32,6 +40,15 @@ export default function Navbar() {
 
       <div className="sidebar-footer">
         Nutrition & Fitness Tracker
+
+        <button
+          type="button"
+          className="food-secondary-button"
+          style={{ width: "100%", marginTop: "14px" }}
+          onClick={handleLogout}
+        >
+          Log out
+        </button>
       </div>
     </aside>
   );

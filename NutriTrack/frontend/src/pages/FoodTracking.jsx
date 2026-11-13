@@ -3,15 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { foodApi } from "../services/api";
 import FoodCatalogPicker from "../components/food-catalog/FoodCatalogPicker";
 
-const emptyForm = {
-  name: "",
-  meal: "Breakfast",
-  calories: "",
-  protein: "",
-  carbs: "",
-  fat: "",
-};
-
 const mealOptions = [
   { value: "Breakfast", label: "Breakfast" },
   { value: "Lunch", label: "Lunch" },
@@ -19,18 +10,15 @@ const mealOptions = [
   { value: "Snack", label: "Snack" },
 ];
 
-const numericFields = ["calories", "protein", "carbs", "fat"];
-
 function formatNumber(value) {
   const number = Number(value);
+
   return (Number.isFinite(number) ? number : 0).toLocaleString(
     "en-US",
     { maximumFractionDigits: 1 }
   );
 }
 
-// รองรับทั้ง API ที่ส่ง Array โดยตรง
-// และ API ที่ส่ง { foods: [...] } หรือ { data: [...] }
 function normalizeFoods(response) {
   let items = response;
 
@@ -47,6 +35,7 @@ function normalizeFoods(response) {
     id: food.id ?? food._id,
     name: String(food.name ?? ""),
     meal: food.meal ?? "Snack",
+    quantity: Number(food.quantity ?? 1),
     calories: Number(food.calories ?? 0),
     protein: Number(food.protein ?? 0),
     carbs: Number(food.carbs ?? 0),
@@ -62,15 +51,14 @@ function getErrorMessage(error, fallback) {
 
 export default function FoodTracking() {
   const [foods, setFoods] = useState([]);
-  const [form, setForm] = useState(emptyForm);
   const [selectedMeal, setSelectedMeal] = useState("All");
+  const [entryMeal, setEntryMeal] = useState("Breakfast");
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
 
-  // โหลดข้อมูลจาก Backend ตอนเปิดหน้า
   useEffect(() => {
     let cancelled = false;
 
@@ -127,88 +115,47 @@ export default function FoodTracking() {
       ? foods
       : foods.filter((food) => food.meal === selectedMeal);
 
-  function handleChange(event) {
-    const { name, value } = event.target;
-
-    setForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
-  }
-
   function resetForm() {
-    setForm(emptyForm);
     setShowForm(false);
+    setEntryMeal("Breakfast");
   }
 
-  async function handleAddFood(event) {
-    event.preventDefault();
+  async function handleAddCatalogFood(food) {
     setError("");
-
-    const name = form.name.trim();
-
-    if (!name) {
-      setError("Please enter a food name.");
-      return;
-    }
-
-    const invalidNumber = numericFields.some((field) => {
-      const value = form[field];
-
-      return (
-        value === "" ||
-        !Number.isFinite(Number(value)) ||
-        Number(value) < 0 ||
-        Number(value) > 100000
-      );
-    });
-
-    if (invalidNumber) {
-      setError("Enter valid non-negative nutrient values.");
-      return;
-    }
-
-    const payload = {
-      name,
-      meal: form.meal,
-      calories: Number(form.calories),
-      protein: Number(form.protein),
-      carbs: Number(form.carbs),
-      fat: Number(form.fat),
-    };
-
     setSaving(true);
 
     try {
+      const payload = {
+        food_id: food.food_id || food.id,
+        name: food.name,
+        meal: entryMeal,
+        quantity: Number(food.quantity),
+        calories: Number(food.calories),
+        protein: Number(food.protein),
+        carbs: Number(food.carbs),
+        fat: Number(food.fat),
+      };
+
       const response = await foodApi.add(payload);
 
-      // รองรับ API ที่ส่งรายการที่สร้างแล้วกลับมา
       const returnedFood =
         response?.food ??
         response?.data?.food ??
         response?.data ??
         response;
 
-      let savedFood;
-
       if (
-        returnedFood &&
-        typeof returnedFood === "object" &&
-        (returnedFood.id != null || returnedFood._id != null)
+        !returnedFood ||
+        typeof returnedFood !== "object" ||
+        (returnedFood.id == null && returnedFood._id == null)
       ) {
-        savedFood = normalizeFoods([returnedFood])[0];
-      } else {
-        // ถ้า API ไม่ส่ง ID กลับมา ให้โหลดรายการใหม่
         const refreshedResponse = await foodApi.getAll();
-        const refreshedFoods = normalizeFoods(refreshedResponse);
+        setFoods(normalizeFoods(refreshedResponse));
+      } else {
+        const savedFood = normalizeFoods([returnedFood])[0];
 
-        setFoods(refreshedFoods);
-        resetForm();
-        return;
+        setFoods((current) => [...current, savedFood]);
       }
-
-      setFoods((current) => [...current, savedFood]);
-      resetForm();
     } catch (err) {
       setError(
         getErrorMessage(
@@ -216,6 +163,8 @@ export default function FoodTracking() {
           "Unable to save food. Please try again."
         )
       );
+
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -246,66 +195,6 @@ export default function FoodTracking() {
       setDeletingId(null);
     }
   }
-
-async function handleAddCatalogFood(food) {
-  setError("");
-  setSaving(true);
-
-  try {
-    const payload = {
-      food_id: food.food_id || food.id,
-      name: food.name,
-      meal: food.meal || form.meal,
-      quantity: Number(food.quantity),
-      calories: Number(food.calories),
-      protein: Number(food.protein),
-      carbs: Number(food.carbs),
-      fat: Number(food.fat),
-    };
-
-    const response = await foodApi.add(payload);
-    const savedFood = normalizeFoods([response.data])[0];
-
-    setFoods((current) => [...current, savedFood]);
-  } catch (err) {
-    setError(
-      getErrorMessage(err, "Unable to save catalog food.")
-    );
-    throw err;
-  } finally {
-    setSaving(false);
-  }
-}
-
-async function handleAddCatalogFood(food) {
-  setError("");
-  setSaving(true);
-
-  try {
-    const payload = {
-      food_id: food.food_id || food.id,
-      name: food.name,
-      meal: food.meal || form.meal,
-      quantity: Number(food.quantity),
-      calories: Number(food.calories),
-      protein: Number(food.protein),
-      carbs: Number(food.carbs),
-      fat: Number(food.fat),
-    };
-
-    const response = await foodApi.add(payload);
-    const savedFood = normalizeFoods([response.data])[0];
-
-    setFoods((current) => [...current, savedFood]);
-  } catch (err) {
-    setError(
-      getErrorMessage(err, "Unable to save catalog food.")
-    );
-    throw err;
-  } finally {
-    setSaving(false);
-  }
-}
 
   return (
     <div className="food-page">
@@ -350,126 +239,29 @@ async function handleAddCatalogFood(food) {
         <section className="food-panel food-form-panel">
           <h2>Add a food entry</h2>
           <p className="food-muted">
-            Enter the nutrient values for the portion you ate.
+            Search the food catalog, select a quantity, and add it to your food diary.
           </p>
+
+          <div className="food-field">
+            <label htmlFor="food-meal">Meal</label>
+            <select
+              id="food-meal"
+              value={entryMeal}
+              onChange={(event) => setEntryMeal(event.target.value)}
+              disabled={saving}
+            >
+              {mealOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
           <FoodCatalogPicker
             onAdd={handleAddCatalogFood}
-            meal={form.meal}
+            meal={entryMeal}
           />
-
-          <form className="food-entry-form" onSubmit={handleAddFood}>
-            <div className="food-field food-field-wide">
-              <label htmlFor="food-name">Food name</label>
-              <input
-                id="food-name"
-                name="name"
-                value={form.name}
-                onChange={handleChange}
-                placeholder="e.g. Grilled chicken and rice"
-                maxLength={100}
-                required
-              />
-            </div>
-
-            <div className="food-field">
-              <label htmlFor="food-meal">Meal</label>
-              <select
-                id="food-meal"
-                name="meal"
-                value={form.meal}
-                onChange={handleChange}
-              >
-                {mealOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="food-field">
-              <label htmlFor="food-calories">Calories (kcal)</label>
-              <input
-                id="food-calories"
-                name="calories"
-                type="number"
-                min="0"
-                max="100000"
-                step="any"
-                value={form.calories}
-                onChange={handleChange}
-                required
-              />
-            </div>
-
-            <div className="food-field">
-              <label htmlFor="food-protein">Protein (g)</label>
-              <input
-                id="food-protein"
-                name="protein"
-                type="number"
-                min="0"
-                max="100000"
-                step="any"
-                value={form.protein}
-                onChange={handleChange}
-                required
-              />
-            </div>
-
-            <div className="food-field">
-              <label htmlFor="food-carbs">Carbohydrates (g)</label>
-              <input
-                id="food-carbs"
-                name="carbs"
-                type="number"
-                min="0"
-                max="100000"
-                step="any"
-                value={form.carbs}
-                onChange={handleChange}
-                required
-              />
-            </div>
-
-            <div className="food-field">
-              <label htmlFor="food-fat">Fat (g)</label>
-              <input
-                id="food-fat"
-                name="fat"
-                type="number"
-                min="0"
-                max="100000"
-                step="any"
-                value={form.fat}
-                onChange={handleChange}
-                required
-              />
-            </div>
-
-            <div className="food-form-actions">
-              <button
-                type="button"
-                className="food-secondary-button"
-                onClick={() => {
-                  resetForm();
-                  setError("");
-                }}
-                disabled={saving}
-              >
-                Cancel
-              </button>
-
-              <button
-                type="submit"
-                className="food-primary-button"
-                disabled={saving}
-              >
-                {saving ? "Saving..." : "Save food"}
-              </button>
-            </div>
-          </form>
         </section>
       )}
 

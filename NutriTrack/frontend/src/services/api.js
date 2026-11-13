@@ -2,7 +2,7 @@
 const API_URL =
   import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-const TOKEN_KEY = "nutritrack_token";
+export const TOKEN_KEY = "nutritrack_token";
 
 // Shared API request
 async function apiRequest(path, options = {}) {
@@ -42,13 +42,24 @@ export const authApi = {
       body: JSON.stringify({ name, email, password }),
     }),
 
+  forgotPassword: (email) =>
+    apiRequest("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token, password) =>
+    apiRequest("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    }),
+
   me: () => apiRequest("/auth/me"),
 };
 
 // Food Tracking API
 export const foodApi = {
   getAll: () => apiRequest("/food"),
-
   getSummary: () => apiRequest("/food/summary"),
 
   add: (data) =>
@@ -103,5 +114,3 @@ export const catalogApi = {
     return data;
   },
 };
-
-export { TOKEN_KEY };
