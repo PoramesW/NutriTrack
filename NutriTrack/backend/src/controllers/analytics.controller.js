@@ -1,130 +1,142 @@
+const pool = require("../config/db");
 
-function getDashboard(req, res) {
-  const { foods, exercises = [], goals } = req.body;
+// GET /api/analytics/dashboard
+async function getDashboard(req, res) {
+  try {
+    const userId = req.user.id;
 
-  if (!Array.isArray(foods)) {
-    return res.status(400).json({
-      success: false,
-      message: "foods must be an array",
-    });
-  }
+    const [foodResult, weightResult, goalResult] = await Promise.all([
+      pool.query(
+        `SELECT
+           id,
+           food_name AS name,
+           meal,
+           quantity,
+           calories,
+           protein,
+           carbs,
+           fat,
+           logged_at AS date
+         FROM food_logs
+         WHERE user_id = $1
+           AND (logged_at AT TIME ZONE 'Asia/Bangkok')::date =
+               (NOW() AT TIME ZONE 'Asia/Bangkok')::date
+         ORDER BY logged_at DESC`,
+        [userId]
+      ),
 
-  if (!Array.isArray(exercises)) {
-    return res.status(400).json({
-      success: false,
-      message: "exercises must be an array",
-    });
-  }
+      pool.query(
+        `SELECT weight_kg, recorded_at
+         FROM body_metrics
+         WHERE user_id = $1
+           AND weight_kg IS NOT NULL
+         ORDER BY recorded_at DESC, created_at DESC
+         LIMIT 1`,
+        [userId]
+      ),
 
-  const nutrients = ["calories", "protein", "carbs", "fat"];
+      pool.query(
+        `SELECT calories, protein, carbs, fat
+         FROM nutrition_goals
+         WHERE user_id = $1
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+        [userId]
+      ),
+    ]);
 
-  const isValidAmount = (value) =>
-    value !== undefined &&
-    value !== null &&
-    value !== "" &&
-    Number.isFinite(Number(value)) &&
-    Number(value) >= 0;
+    const foods = foodResult.rows.map((food) => ({
+      ...food,
+      quantity: Number(food.quantity),
+      calories: Number(food.calories),
+      protein: Number(food.protein),
+      carbs: Number(food.carbs),
+      fat: Number(food.fat),
+    }));
 
-  for (const food of foods) {
-    for (const key of nutrients) {
-      if (!food || !isValidAmount(food[key])) {
-        return res.status(400).json({
-          success: false,
-          message: `Each food must have a valid ${key}`,
-        });
-      }
-    }
-  }
+    const totals = foods.reduce(
+      (sum, food) => {
+        sum.calories += food.calories;
+        sum.protein += food.protein;
+        sum.carbs += food.carbs;
+        sum.fat += food.fat;
+        return sum;
+      },
+      { calories: 0, protein: 0, carbs: 0, fat: 0 }
+    );
 
-  for (const exercise of exercises) {
-    if (!exercise || !isValidAmount(exercise.caloriesBurned)) {
-      return res.status(400).json({
-        success: false,
-        message: "Each exercise must have valid caloriesBurned",
-      });
-    }
-  }
-
-  const defaultGoals = {
-    calories: 2000,
-    protein: 150,
-    carbs: 250,
-    fat: 65,
-  };
-
-  const targets = { ...defaultGoals };
-
-  if (goals !== undefined) {
-    if (!goals || typeof goals !== "object" || Array.isArray(goals)) {
-      return res.status(400).json({
-        success: false,
-        message: "goals must be an object",
-      });
-    }
-
-    for (const key of nutrients) {
-      if (goals[key] !== undefined) {
-        if (
-          !isValidAmount(goals[key]) ||
-          Number(goals[key]) === 0
-        ) {
-          return res.status(400).json({
-            success: false,
-            message: `Goal ${key} must be greater than zero`,
-          });
+    const latestWeight = weightResult.rows[0]
+      ? {
+          weight: Number(weightResult.rows[0].weight_kg),
+          recordedAt: weightResult.rows[0].recorded_at,
         }
+      : null;
 
-        targets[key] = Number(goals[key]);
-      }
-    }
-  }
+    const goal = goalResult.rows[0]
+      ? {
+          calories: Number(goalResult.rows[0].calories),
+          protein: Number(goalResult.rows[0].protein),
+          carbs: Number(goalResult.rows[0].carbs),
+          fat: Number(goalResult.rows[0].fat),
+        }
+      : null;
 
-  const consumed = foods.reduce(
-    (total, food) => {
-      nutrients.forEach((key) => {
-        total[key] += Number(food[key]);
-      });
-
-      return total;
-    },
-    { calories: 0, protein: 0, carbs: 0, fat: 0 }
-  );
-
-  const caloriesBurned = exercises.reduce(
-    (total, exercise) => total + Number(exercise.caloriesBurned),
-    0
-  );
-
-  const nutrition = {};
-
-  for (const key of nutrients) {
-    nutrition[key] = {
-      consumed: Math.round(consumed[key] * 100) / 100,
-      goal: targets[key],
-      remaining:
-        Math.round((targets[key] - consumed[key]) * 100) / 100,
-      percentage:
-        Math.round((consumed[key] / targets[key]) * 10000) / 100,
-    };
-  }
-
-  return res.json({
-    success: true,
-    data: {
-      nutrition,
-      exercise: {
-        caloriesBurned: Math.round(caloriesBurned * 100) / 100,
-        exerciseCount: exercises.length,
+    return res.json({
+      success: true,
+      data: {
+        foods,
+        totals,
+        weight: latestWeight,
+        goals: goal,
       },
-      summary: {
-        caloriesConsumed: Math.round(consumed.calories * 100) / 100,
-        caloriesBurned: Math.round(caloriesBurned * 100) / 100,
-        netCalories:
-          Math.round((consumed.calories - caloriesBurned) * 100) / 100,
-        foodCount: foods.length,
-      },
-    },
-  });
+    });
+  } catch (error) {
+    console.error("Get dashboard error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to retrieve dashboard data",
+    });
+  }
 }
 
-module.exports = { getDashboard };
+// POST /api/analytics/weight
+async function updateWeight(req, res) {
+  try {
+    const weight = Number(req.body.weight);
+
+    if (!Number.isFinite(weight) || weight < 20 || weight > 350) {
+      return res.status(400).json({
+        success: false,
+        message: "Weight must be between 20 and 350 kg",
+      });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO body_metrics (user_id, weight_kg, recorded_at)
+       VALUES ($1, $2, NOW())
+       RETURNING id, weight_kg, recorded_at`,
+      [req.user.id, weight]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Weight saved successfully",
+      data: {
+        id: result.rows[0].id,
+        weight: Number(result.rows[0].weight_kg),
+        recordedAt: result.rows[0].recorded_at,
+      },
+    });
+  } catch (error) {
+    console.error("Update weight error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save weight",
+    });
+  }
+}
+
+module.exports = {
+  getDashboard,
+  updateWeight,
+};
